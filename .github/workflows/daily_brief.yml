@@ -1,41 +1,44 @@
 name: Daily Growth Wave Brief
- 
+
 on:
   schedule:
-    # 7h heure de Paris (UTC+1 hiver / UTC+2 été)
-    # En hiver : 6h UTC → 7h Paris
-    # En été : passe à 5h UTC dans le fichier pour garder 7h Paris
-    - cron: '0 6 * * 1-5'   # Lundi → Vendredi uniquement
- 
-  # Permet de lancer manuellement depuis l'onglet Actions sur GitHub
-  # Utile pour tester sans attendre le cron
-  workflow_dispatch:
- 
+    - cron: '0 6 * * 1-5'   # 7h Paris heure d'hiver (UTC+1)
+  workflow_dispatch:          # Lancement manuel depuis l'onglet Actions
+
+# Permission d'écriture dans le repo pour pousser index.html
+permissions:
+  contents: write
+
 jobs:
   send-brief:
     runs-on: ubuntu-latest
- 
+
     steps:
-      # 1. Récupérer le code du repo
       - name: Checkout
         uses: actions/checkout@v4
- 
-      # 2. Installer Python 3.11
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
- 
-      # 3. Installer les dépendances (uniquement anthropic — le reste est stdlib)
+
       - name: Install dependencies
         run: pip install anthropic markdown
- 
-      # 4. Lancer le script — les secrets sont injectés comme variables d'environnement
+
       - name: Run brief
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          GMAIL_USER:        ${{ secrets.GMAIL_USER }}
+          ANTHROPIC_API_KEY:  ${{ secrets.ANTHROPIC_API_KEY }}
+          GMAIL_USER:         ${{ secrets.GMAIL_USER }}
           GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
-          TO_EMAIL:          ${{ secrets.TO_EMAIL }}
+          TO_EMAIL:           ${{ secrets.TO_EMAIL }}
+          PAGES_URL:          ${{ secrets.PAGES_URL }}
         run: python brief.py
- 
+
+      # Committer et pousser le index.html généré → GitHub Pages le sert automatiquement
+      - name: Push brief to GitHub Pages
+        run: |
+          git config user.name  "GW Brief Bot"
+          git config user.email "brief-bot@growth-wave.agency"
+          git add index.html
+          git commit -m "Brief $(date +'%Y-%m-%d')" || echo "Rien à committer"
+          git push
