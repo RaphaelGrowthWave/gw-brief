@@ -13,7 +13,6 @@ GMAIL_USER         = os.environ["GMAIL_USER"]
 GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"]
 TO_EMAIL           = os.environ.get("TO_EMAIL", GMAIL_USER)
 
-# Contexte GW injecté dans les liens d'action Claude.ai
 GW_CONTEXT = """Tu es l'assistant stratégique de Raphaël, fondateur de Growth Wave.
 Growth Wave est une agence B2B Data & CRM Intelligence française (ETI 50–500 salariés, CA >10M€).
 Framework : Data Governance → Data Audit → Data Production → Data Automation.
@@ -41,84 +40,49 @@ CONTEXTE GROWTH WAVE :
 - Différenciateur : double légitimité sales B2B + data + IA
 
 MISSION DU JOUR ({today}) :
-Recherche les actualités des dernières 48h. NE CITE QUE DES FAITS VÉRIFIÉS avec une source URL réelle.
-Si tu ne trouves pas de source pour une news, ne l'inclus pas.
+Recherche les actualités des dernières 48h. NE CITE QUE DES FAITS VÉRIFIÉS avec source URL réelle.
 
 SUJETS :
 1. CRM & DATA B2B — HubSpot, Salesforce, data CRM, revenue operations, B2B data quality
 2. CLAUDE & ANTHROPIC — Anthropic news, Claude API, programme partenaire, agents IA
 3. IA COMMERCIALE & SALES TECH — AI sales agents, CRM automation, AI revenue ops
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-RÈGLE ABSOLUE SUR LE FORMAT :
-Ta réponse doit commencer DIRECTEMENT par "## Résumé exécutif".
-Pas d'introduction, pas de "Voilà le brief", pas de phrase avant le premier ##.
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-FORMAT STRICT — respecte-le à la lettre :
+FORMAT — commence DIRECTEMENT par ## Résumé exécutif, rien avant :
 
 ## Résumé exécutif
-[3 lignes max, l'essentiel du jour]
-
----
+[3 lignes max]
 
 ## 1. CRM & Data B2B
 
-### 📌 [Titre de l'actu]
+### [Titre actu]
 - **Fait** : [2–3 phrases]
-- **Source** : [URL complète — obligatoire. Si pas de source = ne pas inclure cette news]
-- **Impact GW** : [concret, direct]
-- **Opportunité** : [action concrète]
-[ACTION: Rédiger un pitch court pour les CRO HubSpot sur le pricing Breeze à l'outcome]
+- **Source** : [URL complète — obligatoire]
+- **Impact GW** : [concret]
+- **Opportunité** : [action concrète, ou "Pas d'opportunité immédiate"]
 
-[Répéter pour chaque actu]
-
----
+[répéter pour chaque actu]
 
 ## 2. Claude & Anthropic
-
-### 📌 [Titre de l'actu]
-- **Fait** : [2–3 phrases]
-- **Source** : [URL complète]
-- **Impact GW** : [concret, direct]
-- **Opportunité** : [action concrète]
-[ACTION: Tester Claude Managed Agents sur un enrichissement SIRENE → push HubSpot]
-
-[Répéter pour chaque actu]
-
----
+[même structure]
 
 ## 3. IA Commerciale & Sales Tech
-
-### 📌 [Titre de l'actu]
-- **Fait** : [2–3 phrases]
-- **Source** : [URL complète]
-- **Impact GW** : [concret, direct]
-- **Opportunité** : [action concrète]
-[ACTION: Identifier 10 partenaires HubSpot mid-market à approcher en co-selling]
-
-[Répéter pour chaque actu]
-
----
+[même structure]
 
 ## Top 3 actions du jour
-1. [action concrète]
-2. [action concrète]
-3. [action concrète]
+1. [action]
+2. [action]
+3. [action]
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 RÈGLES :
-- Commence DIRECTEMENT par ## Résumé exécutif, rien avant
-- Le tag [ACTION: texte] est OBLIGATOIRE après chaque bloc Opportunité — copie exactement ce format avec les crochets
-- L'action doit décrire quelque chose que Claude peut faire pour Raphaël (analyse, liste, pitch, séquence...)
-- Termine TOUJOURS par ## Top 3 actions du jour — c'est la section la plus importante
-- Direct, dense, zéro blabla. Lecture 5 min max.
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- Commence DIRECTEMENT par ## Résumé exécutif
+- Source obligatoire pour chaque actu — pas de source = ne pas inclure
+- Termine TOUJOURS par ## Top 3 actions du jour
+- Direct, dense, 5 min de lecture max
 """
 
     response = client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=4500,
+        max_tokens=6000,
         tools=[{"type": "web_search_20250305", "name": "web_search"}],
         messages=[{"role": "user", "content": prompt}]
     )
@@ -128,29 +92,31 @@ RÈGLES :
         if block.type == "text":
             brief_text += block.text
 
-    # ── FIX 1 : Supprimer tout ce qui précède le premier ## ───
-    # Claude ajoute parfois une phrase d'intro avant le vrai contenu
+    # Supprimer tout ce qui précède le premier ##
     first_header = brief_text.find('## ')
     if first_header > 0:
         brief_text = brief_text[first_header:]
+
+    # Supprimer toutes les lignes --- (redondant avec les titres de section)
+    lines = brief_text.split('\n')
+    lines = [l for l in lines if l.strip() != '---']
+    brief_text = '\n'.join(lines)
 
     return brief_text
 
 
 # ── HELPER : Lien Claude.ai pré-contextualisé ────────────────
 
-def make_claude_link(action_description):
+def make_claude_link(action_text):
     """
-    Génère une URL claude.ai/new?q=... avec contexte GW + action.
-    Un clic = une conversation Claude prête à travailler.
+    Génère une URL claude.ai/new?q=... avec contexte GW + l'opportunité.
+    Un clic = conversation Claude prête à travailler sur ce sujet.
     """
     full_prompt = f"""{GW_CONTEXT}
-ACTION DEMANDÉE : {action_description}
+SUJET : {action_text}
 
-Produis une analyse détaillée et des premières étapes concrètes et actionnables pour Raphaël."""
-
-    encoded = quote(full_prompt)
-    return f"https://claude.ai/new?q={encoded}"
+Analyse cette opportunité en détail et propose des premières étapes concrètes et actionnables pour Raphaël."""
+    return f"https://claude.ai/new?q={quote(full_prompt)}"
 
 
 # ── ÉTAPE 2 : Formater en HTML ────────────────────────────────
@@ -160,43 +126,29 @@ def format_email_html(brief_text):
 
     lines      = brief_text.split('\n')
     html_lines = []
+    i = 0
 
-    for line in lines:
-
-        # Séparateur --- → <hr>
-        if line.strip() == '---':
-            html_lines.append(
-                '<hr style="border:none;border-top:1px solid #e5e5e5;margin:20px 0">'
-            )
+    while i < len(lines):
+        line = lines[i]
 
         # H2
-        elif line.startswith('## '):
+        if line.startswith('## '):
             html_lines.append(
                 f'<h2 style="color:#005CF4;border-bottom:2px solid #005CF4;'
-                f'padding-bottom:6px;margin-top:28px;margin-bottom:12px">{line[3:]}</h2>'
+                f'padding-bottom:6px;margin-top:32px;margin-bottom:12px">{line[3:]}</h2>'
             )
 
         # H3
         elif line.startswith('### '):
             html_lines.append(
-                f'<h3 style="color:#002A7A;margin-top:20px;margin-bottom:8px">{line[4:]}</h3>'
-            )
-
-        # [ACTION: ...] → bouton cliquable
-        elif line.strip().startswith('[ACTION:') and line.strip().endswith(']'):
-            action_text = line.strip()[8:-1].strip()
-            link        = make_claude_link(action_text)
-            html_lines.append(
-                f'<div style="margin:14px 0">'
-                f'<a href="{link}" style="display:inline-block;background:#005CF4;color:#ffffff;'
-                f'text-decoration:none;padding:9px 18px;border-radius:6px;font-size:13px;'
-                f'font-weight:bold;letter-spacing:0.2px">⚡ {action_text} →</a>'
-                f'</div>'
+                f'<h3 style="color:#1a1a1a;background:#F0F5FF;padding:8px 12px;'
+                f'border-left:4px solid #005CF4;margin-top:20px;margin-bottom:8px;'
+                f'border-radius:0 4px 4px 0">{line[4:]}</h3>'
             )
 
         # Ligne vide
         elif line.strip() == '':
-            html_lines.append('<br>')
+            html_lines.append('<div style="height:4px"></div>')
 
         # Ligne normale
         else:
@@ -214,32 +166,58 @@ def format_email_html(brief_text):
                 formatted
             )
 
-            # URL brute dans une ligne Source → lien cliquable
+            # URL brute dans les lignes Source → lien cliquable
             if 'Source' in formatted:
                 formatted = re.sub(
                     r'(https?://[^\s<"]+)',
-                    r'<a href="\1" style="color:#005CF4;font-size:12px">\1</a>',
+                    r'<a href="\1" style="color:#005CF4;font-size:12px;word-break:break-all">\1</a>',
                     formatted
                 )
 
-            # Puce - texte → bloc avec barre latérale bleue
+            # Puce - texte → bloc avec barre latérale
             if formatted.strip().startswith('- '):
-                formatted = (
-                    f'<div style="margin:6px 0 6px 8px;padding:6px 12px;'
-                    f'border-left:3px solid #B8D3FA;font-size:14px">'
-                    f'{formatted.strip()[2:]}</div>'
+                content = formatted.strip()[2:]
+
+                # Cas spécial : ligne Opportunité → ajouter bouton automatiquement
+                is_opportunite = (
+                    '<strong>Opportunité</strong>' in content
+                    and 'Pas d\'opportunité' not in content
+                    and 'Pas d'opportunité' not in content
                 )
+
+                html_lines.append(
+                    f'<div style="margin:6px 0 6px 8px;padding:6px 12px;'
+                    f'border-left:3px solid #B8D3FA;font-size:14px">{content}</div>'
+                )
+
+                # Bouton généré automatiquement depuis le texte de l'opportunité
+                if is_opportunite:
+                    # Extraire le texte brut sans HTML pour le lien
+                    clean = re.sub(r'<[^>]+>', '', content)
+                    clean = re.sub(r'^Opportunité\s*:\s*', '', clean).strip()
+                    if clean:
+                        link = make_claude_link(clean)
+                        html_lines.append(
+                            f'<div style="margin:8px 0 14px 8px">'
+                            f'<a href="{link}" style="display:inline-block;background:#005CF4;'
+                            f'color:#ffffff;text-decoration:none;padding:7px 16px;'
+                            f'border-radius:5px;font-size:12px;font-weight:bold">'
+                            f'⚡ Explorer cette opportunité →</a></div>'
+                        )
+
             # Numéroté 1. 2. 3.
             elif re.match(r'^\d+\.', formatted.strip()):
-                formatted = f'<p style="margin:6px 0;padding-left:8px">{formatted.strip()}</p>'
+                html_lines.append(
+                    f'<p style="margin:6px 0;padding-left:8px;font-size:14px">{formatted.strip()}</p>'
+                )
             else:
-                formatted = f'<p style="margin:4px 0">{formatted}</p>'
+                html_lines.append(f'<p style="margin:4px 0">{formatted}</p>')
 
-            html_lines.append(formatted)
+        i += 1
 
     html_body = '\n'.join(html_lines)
 
-    html = f"""
+    return f"""
     <html>
     <body style="font-family:'Arial',sans-serif;max-width:680px;margin:auto;
                  padding:24px;color:#1a1a1a;background:#ffffff">
@@ -267,8 +245,6 @@ def format_email_html(brief_text):
     </html>
     """
 
-    return html
-
 
 # ── ÉTAPE 3 : Envoyer ────────────────────────────────────────
 
@@ -277,7 +253,6 @@ def send_email(subject, html_content):
     msg['Subject'] = subject
     msg['From']    = GMAIL_USER
     msg['To']      = TO_EMAIL
-
     msg.attach(MIMEText(html_content, 'html'))
 
     with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
