@@ -1,29 +1,36 @@
 import anthropic
 import smtplib
 import os
+import re
+from urllib.parse import quote
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from datetime import datetime
 
 # ── CONFIG ────────────────────────────────────────────────────
-# Ces variables viennent des secrets GitHub Actions (jamais en dur dans le code)
-ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
-GMAIL_USER        = os.environ["GMAIL_USER"]
+ANTHROPIC_API_KEY  = os.environ["ANTHROPIC_API_KEY"]
+GMAIL_USER         = os.environ["GMAIL_USER"]
 GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"]
-TO_EMAIL          = os.environ.get("TO_EMAIL", GMAIL_USER)  # Par défaut, s'envoie à soi-même
+TO_EMAIL           = os.environ.get("TO_EMAIL", GMAIL_USER)
+
+# Contexte GW injecté dans les liens d'action Claude.ai
+GW_CONTEXT = """Tu es l'assistant stratégique de Raphaël, fondateur de Growth Wave.
+Growth Wave est une agence B2B Data & CRM Intelligence française (ETI 50–500 salariés, CA >10M€).
+Framework : Data Governance → Data Audit → Data Production → Data Automation.
+Positionnement : "L'IA commerciale commence par une donnée propre."
+Partenariat Anthropic validé. Vision : agents IA dans HubSpot/Salesforce à 30–80K€/an.
+"""
 
 
-# ── ÉTAPE 1 : Générer le brief via Claude + web search ────────
+# ── ÉTAPE 1 : Générer le brief ────────────────────────────────
 
 def generate_brief():
     """
-    Demande à Claude de chercher les news des 48h et de les analyser
-    sous l'angle Growth Wave. Un seul appel API — Claude décide lui-même
-    quoi chercher selon le prompt.
+    Claude cherche les news 48h, les analyse sous l'angle GW,
+    cite ses sources, et balise chaque opportunité actionnable.
     """
     client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-
-    today = datetime.now().strftime("%A %d %B %Y")
+    today  = datetime.now().strftime("%A %d %B %Y")
 
     prompt = f"""Tu es l'assistant stratégique de Raphaël, fondateur de Growth Wave.
 
@@ -38,55 +45,61 @@ CONTEXTE GROWTH WAVE :
 - Différenciateur : double légitimité sales B2B + data + IA
 
 MISSION DU JOUR ({today}) :
-Recherche les actualités des dernières 48h sur ces 3 sujets et produis un brief actionnable.
+Recherche les actualités des dernières 48h sur ces 3 sujets. NE CITE QUE DES FAITS VÉRIFIÉS avec une source URL réelle.
 
-SUJETS À COUVRIR :
+SUJETS :
+1. CRM & DATA B2B — HubSpot, Salesforce, data CRM, revenue operations, B2B data quality
+2. CLAUDE & ANTHROPIC — Anthropic news, Claude API, programme partenaire, agents IA
+3. IA COMMERCIALE & SALES TECH — AI sales agents, CRM automation, AI revenue ops
 
-1. CRM & DATA B2B
-   Mots-clés : HubSpot, Salesforce, data CRM, revenue operations, sales enablement, B2B data quality
-
-2. CLAUDE & ANTHROPIC
-   Mots-clés : Anthropic news, Claude API updates, Claude partner program, Claude agents
-
-3. IA COMMERCIALE & SALES TECH
-   Mots-clés : AI sales agents, CRM automation, AI revenue ops, sales AI tools
-
-FORMAT DE RÉPONSE :
+FORMAT STRICT :
 
 ## Résumé exécutif
-3 lignes max. L'essentiel du jour — ce que Raphaël doit savoir avant tout.
+3 lignes max. L'essentiel du jour.
+
+---
 
 ## 1. CRM & Data B2B
-Pour chaque actu trouvée :
-- **Fait** : [2–3 phrases]
+
+### 📌 [Titre de l'actu]
+- **Fait** : [2–3 phrases. UNIQUEMENT si tu as trouvé une source réelle.]
+- **Source** : [URL complète de l'article]
 - **Impact GW** : [concret, direct]
-- **Opportunité** : [action possible ou "pas d'opportunité immédiate"]
+- **Opportunité** : [action concrète ou "Pas d'opportunité immédiate"]
+- **[ACTION: description précise de l'action en 1 phrase]**
+
+[Répéter pour chaque actu trouvée]
+
+---
 
 ## 2. Claude & Anthropic
 [même structure]
 
+---
+
 ## 3. IA Commerciale & Sales Tech
 [même structure]
 
-## Top 3 actions du jour
-Les 3 trucs à faire ou surveiller suite à ces news. Concret, pas de bullshit.
+---
 
-RÈGLES :
-- Direct, dense, zéro blabla
-- Si une news n'a pas d'angle GW, dis-le en une ligne et passe
-- Raphaël lit ce brief en 5 minutes maximum
-- Privilégie les opportunités business concrètes (prospect à cibler, angle de pitch, feature à surveiller)
+## Top 3 actions du jour
+1. [action concrète]
+2. [action concrète]
+3. [action concrète]
+
+RÈGLES ABSOLUES :
+- Si tu n'as PAS trouvé de source réelle pour une news → ne l'inclus pas, passe à la suivante
+- Chaque [ACTION: ...] doit décrire une action que Raphaël peut déléguer à Claude (ex: "Identifier 10 partenaires HubSpot mid-market à approcher en co-selling", "Rédiger un angle de pitch autour du pricing Breeze à l'outcome")
+- Direct, dense, zéro blabla. Lecture en 5 minutes max.
 """
 
-    # Appel Claude avec l'outil de recherche web natif
     response = client.messages.create(
         model="claude-sonnet-4-6",
-        max_tokens=2500,
+        max_tokens=3500,  # Augmenté pour ne plus couper le brief
         tools=[{"type": "web_search_20250305", "name": "web_search"}],
         messages=[{"role": "user", "content": prompt}]
     )
 
-    # Extraire uniquement les blocs texte (pas les appels d'outil)
     brief_text = ""
     for block in response.content:
         if block.type == "text":
@@ -95,52 +108,117 @@ RÈGLES :
     return brief_text
 
 
+# ── HELPER : Générer un lien Claude.ai pré-contextualisé ──────
+
+def make_claude_link(action_description):
+    """
+    Génère une URL claude.ai/new?q=... avec le contexte GW + l'action.
+    Un clic ouvre directement une conversation Claude prête à travailler.
+    """
+    full_prompt = f"""{GW_CONTEXT}
+ACTION DEMANDÉE : {action_description}
+
+Produis une analyse détaillée et des premières étapes concrètes et actionnables pour Raphaël."""
+
+    encoded = quote(full_prompt)
+    return f"https://claude.ai/new?q={encoded}"
+
+
 # ── ÉTAPE 2 : Formater en HTML ────────────────────────────────
 
 def format_email_html(brief_text):
     """
-    Convertit le brief markdown en HTML lisible.
-    Utilise les couleurs Growth Wave.
+    Convertit le brief markdown en HTML propre.
+    Gère : ## titres, ### sous-titres, --- séparateurs,
+    **gras**, - puces, [ACTION: ...] → boutons cliquables.
     """
     today = datetime.now().strftime("%d/%m/%Y")
 
-    # Conversion basique markdown → HTML ligne par ligne
-    lines = brief_text.split('\n')
+    lines      = brief_text.split('\n')
     html_lines = []
 
     for line in lines:
-        if line.startswith('## '):
-            # Titre de section → H2 bleu GW
+
+        # Séparateur --- → ligne horizontale
+        if line.strip() == '---':
+            html_lines.append('<hr style="border:none;border-top:1px solid #e5e5e5;margin:20px 0">')
+
+        # Titre H2
+        elif line.startswith('## '):
             html_lines.append(
                 f'<h2 style="color:#005CF4;border-bottom:2px solid #005CF4;'
-                f'padding-bottom:6px;margin-top:28px">{line[3:]}</h2>'
+                f'padding-bottom:6px;margin-top:28px;margin-bottom:12px">{line[3:]}</h2>'
             )
+
+        # Titre H3
         elif line.startswith('### '):
-            html_lines.append(f'<h3 style="color:#002A7A">{line[4:]}</h3>')
+            html_lines.append(
+                f'<h3 style="color:#002A7A;margin-top:20px;margin-bottom:8px">{line[4:]}</h3>'
+            )
+
+        # Tag [ACTION: ...] → bouton cliquable vers Claude.ai
+        elif line.strip().startswith('[ACTION:') and line.strip().endswith(']'):
+            action_text = line.strip()[8:-1].strip()  # Extrait le texte entre [ACTION: et ]
+            link        = make_claude_link(action_text)
+            html_lines.append(
+                f'<div style="margin:12px 0">'
+                f'<a href="{link}" style="display:inline-block;background:#005CF4;color:#ffffff;'
+                f'text-decoration:none;padding:8px 16px;border-radius:6px;font-size:13px;'
+                f'font-weight:bold">⚡ {action_text} →</a>'
+                f'</div>'
+            )
+
+        # Ligne vide
         elif line.strip() == '':
             html_lines.append('<br>')
+
+        # Ligne normale — gestion du gras et des puces
         else:
-            # Gestion du gras inline **texte**
             formatted = line
+
+            # Gras **texte**
             while '**' in formatted:
                 formatted = formatted.replace('**', '<strong>', 1)
                 formatted = formatted.replace('**', '</strong>', 1)
-            # Tiret de liste → puce simple
+
+            # Lien markdown [texte](url) → <a href>
+            formatted = re.sub(
+                r'\[([^\]]+)\]\((https?://[^\)]+)\)',
+                r'<a href="\2" style="color:#005CF4">\1</a>',
+                formatted
+            )
+
+            # Source : url brute → lien cliquable
+            if '**Source**' in formatted or '- **Source**' in formatted:
+                formatted = re.sub(
+                    r'(https?://[^\s<]+)',
+                    r'<a href="\1" style="color:#005CF4;font-size:12px">\1</a>',
+                    formatted
+                )
+
+            # Puce - texte
             if formatted.strip().startswith('- '):
-                formatted = f'&bull; {formatted.strip()[2:]}'
-            html_lines.append(f'<p style="margin:4px 0">{formatted}</p>')
+                formatted = (
+                    f'<div style="margin:5px 0 5px 8px;padding-left:12px;'
+                    f'border-left:3px solid #B8D3FA">{formatted.strip()[2:]}</div>'
+                )
+            # Liste numérotée 1. 2. 3.
+            elif re.match(r'^\d+\.', formatted.strip()):
+                formatted = f'<p style="margin:6px 0;padding-left:8px">{formatted.strip()}</p>'
+            else:
+                formatted = f'<p style="margin:4px 0">{formatted}</p>'
+
+            html_lines.append(formatted)
 
     html_body = '\n'.join(html_lines)
 
-    # Template email Growth Wave
     html = f"""
     <html>
     <body style="font-family:'Arial',sans-serif;max-width:680px;margin:auto;
                  padding:24px;color:#1a1a1a;background:#ffffff">
 
       <!-- Header -->
-      <div style="background:#010513;padding:18px 24px;border-radius:10px;
-                  margin-bottom:28px;display:flex;align-items:center">
+      <div style="background:#010513;padding:18px 24px;border-radius:10px;margin-bottom:28px">
         <span style="color:#F7F7F8;font-size:20px;font-weight:bold;letter-spacing:-0.5px">
           ⚡ Growth Wave Brief
         </span>
@@ -168,19 +246,13 @@ def format_email_html(brief_text):
 # ── ÉTAPE 3 : Envoyer via Gmail SMTP ─────────────────────────
 
 def send_email(subject, html_content):
-    """
-    Envoi via Gmail SMTP avec App Password.
-    Plus simple qu'OAuth pour un cron — aucune expiration de token.
-    """
-    msg = MIMEMultipart('alternative')
+    msg            = MIMEMultipart('alternative')
     msg['Subject'] = subject
     msg['From']    = GMAIL_USER
     msg['To']      = TO_EMAIL
 
-    # On attache uniquement la version HTML (pas de fallback texte pour l'instant)
     msg.attach(MIMEText(html_content, 'html'))
 
-    # Connexion SSL port 465 — plus robuste que STARTTLS pour les crons
     with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
         server.login(GMAIL_USER, GMAIL_APP_PASSWORD)
         server.sendmail(GMAIL_USER, TO_EMAIL, msg.as_string())
