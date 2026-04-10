@@ -24,9 +24,10 @@ Partenariat Anthropic validé. Vision : agents IA dans HubSpot/Salesforce à 30�
 
 SYSTEM_PROMPT = """Tu es l'assistant stratégique de Raphaël Masson, fondateur de Growth Wave.
 
-RÈGLE ABSOLUE : Ta réponse commence IMMÉDIATEMENT par "## Résumé exécutif".
-Aucun texte avant. Le premier caractère est #.
-Termine TOUJOURS par "## Top 3 actions du jour"."""
+RÈGLES ABSOLUES :
+1. Ta réponse commence IMMÉDIATEMENT par "## Résumé exécutif". Aucun texte avant. Le premier caractère est #.
+2. Le "## Top 3 actions du jour" vient EN DEUXIÈME, juste après le Résumé exécutif, AVANT les sections détaillées.
+3. FILTRE SIGNAL/BRUIT : N'inclus une actu QUE si elle génère une action concrète pour GW dans les 7 prochains jours. Si une news est intéressante mais sans action immédiate → ignore-la. Un brief court et dense vaut mieux qu'un brief long et dilué."""
 
 
 # ── ÉTAPE 1 : Générer le brief ────────────────────────────────
@@ -38,6 +39,10 @@ def generate_brief():
     user_prompt = f"""MISSION ({today}) — Recherche les actualités des dernières 48h.
 Ne cite que des faits vérifiés avec source URL réelle. Pas de source = pas d'actu.
 
+FILTRE OBLIGATOIRE : Pour chaque actu trouvée, pose-toi la question :
+"Est-ce que cette news génère une action concrète pour GW dans les 7 prochains jours ?"
+Si non → ne l'inclus pas. Garde uniquement les actus actionnables immédiatement.
+
 SUJETS :
 1. CRM & DATA B2B — HubSpot, Salesforce, data CRM, revenue operations
 2. CLAUDE & ANTHROPIC — Anthropic news, Claude API, agents, programme partenaire
@@ -47,10 +52,15 @@ CONTEXTE GW : Agence B2B Data & CRM Intelligence française, ETI 50–500 salari
 Positionnement : "L'IA commerciale commence par une donnée propre."
 Partenariat Anthropic validé. Vision agents IA dans HubSpot/Salesforce.
 
-FORMAT STRICT :
+FORMAT STRICT — respecte l'ordre exactement :
 
 ## Résumé exécutif
-[3 lignes max]
+[3 lignes max — uniquement les actus qui passent le filtre]
+
+## Top 3 actions du jour
+1. [action concrète à faire cette semaine]
+2. [action concrète à faire cette semaine]
+3. [action concrète à faire cette semaine]
 
 ## 1. CRM & Data B2B
 
@@ -58,7 +68,7 @@ FORMAT STRICT :
 - **Fait** : [2–3 phrases]
 - **Source** : [URL complète — obligatoire]
 - **Impact GW** : [concret]
-- **Opportunité** : [action concrète]
+- **Opportunité** : [action concrète dans les 7 jours]
 
 [MAXIMUM 3 actus par section — pas plus]
 
@@ -67,11 +77,6 @@ FORMAT STRICT :
 
 ## 3. IA Commerciale & Sales Tech
 [même structure, max 3 actus]
-
-## Top 3 actions du jour
-1. [action]
-2. [action]
-3. [action]
 """
 
     response = client.messages.create(
