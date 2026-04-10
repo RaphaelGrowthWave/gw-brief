@@ -28,7 +28,7 @@ jobs:
  
       # 3. Installer les dépendances (uniquement anthropic — le reste est stdlib)
       - name: Install dependencies
-        run: pip install anthropic
+        run: pip install anthropic markdown
  
       # 4. Lancer le script — les secrets sont injectés comme variables d'environnement
       - name: Run brief
